@@ -93,6 +93,10 @@ const startServer = async () => {
 
     cronService.start();
 
+    const { startWorker } = require('./workers/jobWorker');
+    await startWorker();
+    logger.info('Worker started inside server process');
+
     server.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
