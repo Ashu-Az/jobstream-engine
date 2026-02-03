@@ -18,8 +18,8 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
-    credentials: true,
+    origin: process.env.CLIENT_URL || '*',
+    credentials: process.env.CLIENT_URL ? true : false,
   },
 });
 
@@ -28,8 +28,8 @@ const PORT = process.env.PORT || 5000;
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(compression());
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
-  credentials: true,
+  origin: process.env.CLIENT_URL || '*',
+  credentials: process.env.CLIENT_URL ? true : false,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));

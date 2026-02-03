@@ -1,4 +1,5 @@
 require('dotenv').config();
+const http = require('http');
 const { jobImportQueue } = require('../queues/jobQueue');
 const jobFetcherService = require('../services/jobFetcherService');
 const jobImportService = require('../services/jobImportService');
@@ -98,6 +99,14 @@ const startWorker = async () => {
     });
 
     logger.info('Worker started successfully');
+
+    const keepAlivePort = process.env.PORT || 5001;
+    http.createServer((req, res) => {
+      res.writeHead(200);
+      res.end('Worker alive');
+    }).listen(keepAlivePort, () => {
+      console.log(`Worker keep-alive server on port ${keepAlivePort}`);
+    });
   } catch (error) {
     logger.error(`Worker startup failed: ${error.message}`);
     process.exit(1);
