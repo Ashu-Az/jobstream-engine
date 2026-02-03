@@ -112,6 +112,9 @@ server/
   src/workers/           queue processor
   src/utils/             logger, XML parser, job transformer
 
+docs/
+  architecture.md        system design and decisions
+
 docker-compose.yml       local dev with Docker
 ```
 
