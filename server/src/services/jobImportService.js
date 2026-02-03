@@ -20,6 +20,7 @@ class JobImportService {
 
     logger.info(`Starting import of ${jobs.length} jobs from ${source}`);
 
+    let batchIndex = 0;
     for (let i = 0; i < jobs.length; i += this.batchSize) {
       const batch = jobs.slice(i, i + this.batchSize);
       const batchResults = await this.processBatch(batch);
@@ -29,14 +30,19 @@ class JobImportService {
       stats.failedJobs += batchResults.failedJobs;
       stats.failedJobsDetails.push(...batchResults.failedJobsDetails);
 
-      await this.updateImportLog(importLogId, {
-        newJobs: stats.newJobs,
-        updatedJobs: stats.updatedJobs,
-        failedJobs: stats.failedJobs,
-      });
+      batchIndex++;
+      // Write to DB every 10 batches instead of every batch.
+      // At 1M jobs / 100 per batch that would be 10,000 log updates otherwise.
+      if (batchIndex % 10 === 0) {
+        await this.updateImportLog(importLogId, {
+          newJobs: stats.newJobs,
+          updatedJobs: stats.updatedJobs,
+          failedJobs: stats.failedJobs,
+        });
+      }
 
       logger.info(
-        `Processed batch ${Math.floor(i / this.batchSize) + 1}: ` +
+        `Processed batch ${batchIndex}: ` +
           `${batchResults.newJobs} new, ${batchResults.updatedJobs} updated, ` +
           `${batchResults.failedJobs} failed`
       );
@@ -59,49 +65,52 @@ class JobImportService {
       failedJobsDetails: [],
     };
 
-    const operations = jobs.map(async (job) => {
-      try {
-        const validation = validateJobData(job);
-        if (!validation.isValid) {
-          throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
-        }
-
-        const existing = await Job.findOne({ jobId: job.jobId });
-
-        if (existing) {
-          const hasChanges = this.hasSignificantChanges(existing, job);
-          if (hasChanges) {
-            await Job.updateOne({ jobId: job.jobId }, { $set: job });
-            results.updatedJobs++;
-          }
-        } else {
-          await Job.create(job);
-          results.newJobs++;
-        }
-      } catch (error) {
+    // Validate first — collect valid jobs and record failures separately
+    const validJobs = [];
+    for (const job of jobs) {
+      const validation = validateJobData(job);
+      if (!validation.isValid) {
         results.failedJobs++;
         results.failedJobsDetails.push({
           jobId: job.jobId || 'unknown',
-          reason: error.message,
-          error: error.stack,
+          reason: `Validation failed: ${validation.errors.join(', ')}`,
           data: job,
         });
-        logger.error(`Failed to import job ${job.jobId}: ${error.message}`);
+        logger.error(`Validation failed for job ${job.jobId}: ${validation.errors.join(', ')}`);
+      } else {
+        validJobs.push(job);
       }
-    });
+    }
 
-    await Promise.all(operations);
+    if (validJobs.length === 0) return results;
+
+    try {
+      // Single bulkWrite with upsert — one round-trip to MongoDB per batch,
+      // no race condition on duplicate jobIds.
+      const operations = validJobs.map((job) => ({
+        updateOne: {
+          filter: { jobId: job.jobId },
+          update: { $set: job },
+          upsert: true,
+        },
+      }));
+
+      const bulkResult = await Job.bulkWrite(operations, { ordered: false });
+
+      results.newJobs = bulkResult.upsertedCount || 0;
+      results.updatedJobs = bulkResult.modifiedCount || 0;
+    } catch (error) {
+      // If bulkWrite itself throws (e.g. connection error), mark all as failed
+      results.failedJobs += validJobs.length;
+      results.failedJobsDetails.push({
+        jobId: 'batch',
+        reason: `bulkWrite error: ${error.message}`,
+        error: error.stack,
+      });
+      logger.error(`Batch bulkWrite failed: ${error.message}`);
+    }
+
     return results;
-  }
-
-  hasSignificantChanges(existing, newJob) {
-    const fieldsToCompare = ['title', 'description', 'location', 'company', 'jobType'];
-
-    return fieldsToCompare.some((field) => {
-      const existingValue = String(existing[field] || '').trim();
-      const newValue = String(newJob[field] || '').trim();
-      return existingValue !== newValue;
-    });
   }
 
   async updateImportLog(importLogId, updates) {
@@ -126,13 +135,13 @@ class JobImportService {
     }
   }
 
-  async finalizeImportLog(importLogId, stats, status = 'completed', error = null) {
+  async finalizeImportLog(importLogId, stats, status = 'completed', importError = null) {
     try {
       const updates = {
         status,
         ...stats,
         endTime: new Date(),
-        error,
+        error: importError,
       };
 
       const log = await ImportLog.findById(importLogId);
@@ -141,8 +150,8 @@ class JobImportService {
       }
 
       await ImportLog.findByIdAndUpdate(importLogId, { $set: updates });
-    } catch (error) {
-      logger.error(`Failed to finalize import log: ${error.message}`);
+    } catch (err) {
+      logger.error(`Failed to finalize import log: ${err.message}`);
     }
   }
 }

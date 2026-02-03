@@ -113,7 +113,7 @@ export default function ImportHistoryTable({ logs, onRefresh }: Props) {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        {log.totalImported}
+                        {log.totalFetched}
                       </TableCell>
                       <TableCell className="text-right text-green-600 font-medium">
                         {log.newJobs}
@@ -160,7 +160,7 @@ export default function ImportHistoryTable({ logs, onRefresh }: Props) {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Total</p>
-                  <p className="mt-1 text-2xl font-bold">{selectedLog.totalImported}</p>
+                  <p className="mt-1 text-2xl font-bold">{selectedLog.totalFetched}</p>
                 </div>
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Duration</p>

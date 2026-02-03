@@ -6,20 +6,16 @@ const jobSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      index: true,
     },
     title: {
       type: String,
       required: true,
-      index: true,
     },
     company: {
       type: String,
-      index: true,
     },
     location: {
       type: String,
-      index: true,
     },
     description: {
       type: String,
@@ -30,15 +26,12 @@ const jobSchema = new mongoose.Schema(
     },
     publishedDate: {
       type: Date,
-      index: true,
     },
     jobType: {
       type: String,
-      index: true,
     },
     category: {
       type: String,
-      index: true,
     },
     region: {
       type: String,
@@ -49,7 +42,6 @@ const jobSchema = new mongoose.Schema(
     source: {
       type: String,
       required: true,
-      index: true,
     },
     rawData: {
       type: mongoose.Schema.Types.Mixed,
@@ -57,7 +49,6 @@ const jobSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
-      index: true,
     },
   },
   {

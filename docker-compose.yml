@@ -43,34 +43,10 @@ services:
       - CRON_SCHEDULE=0 * * * *
       - REQUEST_TIMEOUT=30000
       - MAX_REQUESTS_PER_MINUTE=60
+      - CLIENT_URL=http://localhost:3000
     depends_on:
       - mongodb
       - redis
-    networks:
-      - job-importer-network
-    volumes:
-      - ./server/logs:/app/logs
-
-  worker:
-    build:
-      context: ./server
-      dockerfile: Dockerfile
-    container_name: job-importer-worker
-    restart: unless-stopped
-    command: node src/workers/jobWorker.js
-    environment:
-      - NODE_ENV=production
-      - MONGODB_URI=mongodb://mongodb:27017/job-importer
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - QUEUE_CONCURRENCY=5
-      - BATCH_SIZE=100
-      - MAX_RETRY_ATTEMPTS=3
-      - REQUEST_TIMEOUT=30000
-    depends_on:
-      - mongodb
-      - redis
-      - server
     networks:
       - job-importer-network
     volumes:

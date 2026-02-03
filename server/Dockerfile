@@ -10,6 +10,6 @@ COPY . .
 
 RUN mkdir -p logs
 
-EXPOSE 5000
+EXPOSE 5001
 
 CMD ["node", "src/index.js"]

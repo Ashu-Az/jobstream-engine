@@ -68,6 +68,8 @@ const addBulkJobsToQueue = async (urls) => {
           type: 'exponential',
           delay: 2000,
         },
+        removeOnComplete: 100,
+        removeOnFail: 200,
       },
     }));
 

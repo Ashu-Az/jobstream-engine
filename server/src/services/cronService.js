@@ -56,13 +56,11 @@ class CronService {
           name: 'Jobicy - Management',
           category: 'management',
         },
-        // Temporarily disabled due to malformed XML
-        // {
-        //   url: 'https://www.higheredjobs.com/rss/articleFeed.cfm',
-        //   name: 'HigherEdJobs',
-        //   category: 'education',
-        //   isActive: false,
-        // },
+        {
+          url: 'https://www.higheredjobs.com/rss/articleFeed.cfm',
+          name: 'HigherEdJobs',
+          category: 'education',
+        },
       ];
 
       for (const feed of feeds) {

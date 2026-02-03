@@ -69,8 +69,7 @@ const processJob = async (job) => {
 
 const startWorker = async () => {
   try {
-    console.log('Worker starting...');
-    console.log('Environment check:', {
+    logger.info('Worker starting...', {
       MONGODB_URI: process.env.MONGODB_URI ? 'SET' : 'MISSING',
       REDIS_HOST: process.env.REDIS_HOST || 'MISSING',
       REDIS_PORT: process.env.REDIS_PORT || 'MISSING',
@@ -79,7 +78,7 @@ const startWorker = async () => {
     });
 
     await connectDB();
-    console.log('MongoDB connected');
+    logger.info('MongoDB connected');
 
     logger.info(`Starting worker with concurrency: ${CONCURRENCY}`);
 

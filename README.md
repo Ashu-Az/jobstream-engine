@@ -1,134 +1,156 @@
 # JobStream Engine
 
-A job aggregation platform that pulls listings from multiple XML feeds, processes them through a Redis queue, and displays everything on a clean real-time dashboard.
+Pulls job listings from multiple RSS/XML feeds, queues them through Redis, imports into MongoDB, and shows everything on a real-time dashboard.
 
 ## Live
 
 | Service | URL |
-|---------|-----|
+|---|---|
 | Frontend | https://jobstream-engine.vercel.app |
-| Backend API | https://jobstream-engine-1.onrender.com |
-| Worker | https://jobstream-engine1.onrender.com |
+| Backend | https://jobstream-engine-1.onrender.com |
 
-Hit the dashboard, click "Trigger Bulk Import", and watch it pull in jobs from 8 different feeds automatically. No setup needed on your end — if the database is empty it initializes everything by itself.
+## How it works
 
-## How It Works
-
-When you trigger an import, the server grabs all the active feed URLs from MongoDB and throws them into a Bull queue backed by Redis. The worker picks those jobs up (5 at a time), fetches the XML from each feed, parses out the job listings, and saves them to MongoDB. If a feed fails it retries up to 3 times with exponential backoff. Once a job finishes processing, Socket.IO pushes the update to the dashboard in real time.
+1. A cron job runs every hour (or you click "Trigger Bulk Import" on the dashboard). It reads the active feed URLs from MongoDB and pushes one Bull job per feed into the queue.
+2. The worker picks jobs off the queue (5 at a time by default), fetches the XML, parses it, and runs a `bulkWrite` upsert into MongoDB. One round-trip per batch — no per-document queries.
+3. If a feed times out or returns bad data, Bull retries up to 3 times with exponential backoff. XML parse errors fail immediately since retrying won't fix malformed markup.
+4. Each import run gets its own `ImportLog` document — tracks how many jobs were fetched, created, updated, or failed, plus the reason for each failure.
+5. Socket.IO pushes status updates to the dashboard as they happen. The frontend also polls while the queue is active, so nothing falls through if a socket event gets dropped.
 
 ```
-Dashboard  →  Express Server  →  Redis (Bull Queue)  →  Worker
-                   ↕                                      ↓
-              MongoDB  ←──────────────────────────────────┘
+Cron / Dashboard  →  Bull Queue (Redis)  →  Worker  →  MongoDB (bulkWrite upsert)
+                                              ↓
+                                        Socket.IO  →  Next.js Dashboard
 ```
 
-## Tech Stack
+## Prerequisites
 
-- **Backend** — Node.js, Express, Mongoose, Bull, Socket.IO, Winston, xml2js
-- **Frontend** — Next.js 14, TypeScript, Tailwind CSS, shadcn/ui, Lucide
-- **Databases** — MongoDB (Atlas), Redis (Upstash)
-- **Hosting** — Vercel (frontend), Render (backend + worker)
+- Node.js 18 or later
+- MongoDB 6+ (install via [MongoDB docs](https://www.mongodb.com/docs/manual/installation/) or use Atlas)
+- Redis 7+ (install via your package manager or use a managed service like Upstash)
 
-## Running Locally
+Make sure both MongoDB and Redis are running before you start the server.
 
-You'll need Node 18+, MongoDB, and Redis running locally.
+## Running locally
 
 ```bash
-# Backend
+# 1. Clone and go to the repo root
+git clone <repo-url>
+cd jobstream-engine
+
+# 2. Backend — starts the Express server AND the queue worker in the same process
 cd server
+cp .env.example .env          # edit if your Mongo/Redis URLs differ from defaults
 npm install
 npm run dev
 
-# Worker (separate terminal)
-cd server
-npm run worker
-
-# Frontend (separate terminal)
-cd client
+# 3. Frontend — open a second terminal
+cd ../client
+cp .env.example .env.local    # defaults point to localhost:5001, usually fine
 npm install
-npm run dev
+npm run dev                   # opens on http://localhost:3000
 ```
 
-Or just use Docker and it spins up everything for you:
+That's it. Open the dashboard, hit "Trigger Bulk Import", and watch the history table fill in.
+
+### Docker (alternative)
+
+If you'd rather not install Mongo and Redis yourself, Docker Compose spins up everything:
 
 ```bash
 docker compose up -d
 ```
 
-## Environment Variables
+Frontend will be at `http://localhost:3000`.
 
-**server/.env**
-```env
-PORT=5001
-NODE_ENV=development
-MONGODB_URI=mongodb://localhost:27017/job-importer
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
-REDIS_TLS=false
-QUEUE_CONCURRENCY=5
-BATCH_SIZE=100
-CRON_SCHEDULE=0 * * * *
-CLIENT_URL=http://localhost:3000
+## Environment variables
+
+**server/.env** (copy from `.env.example`)
+
+| Variable | Default | What it does |
+|---|---|---|
+| `PORT` | 5001 | HTTP server port |
+| `MONGODB_URI` | `mongodb://localhost:27017/job-importer` | MongoDB connection string |
+| `REDIS_HOST` | localhost | Redis host |
+| `REDIS_PORT` | 6379 | Redis port |
+| `REDIS_PASSWORD` | — | Redis auth (leave blank if none) |
+| `REDIS_TLS` | false | Set to `true` for managed Redis like Upstash |
+| `QUEUE_CONCURRENCY` | 5 | How many feeds the worker processes in parallel |
+| `BATCH_SIZE` | 100 | Jobs per `bulkWrite` call to MongoDB |
+| `MAX_RETRY_ATTEMPTS` | 3 | Bull retry count per feed |
+| `CRON_SCHEDULE` | `0 * * * *` | Cron expression — default is every hour |
+| `REQUEST_TIMEOUT` | 30000 | Feed fetch timeout in ms |
+| `CLIENT_URL` | `http://localhost:3000` | Frontend origin, used for CORS and Socket.IO |
+
+**client/.env.local** (copy from `.env.example`)
+
+| Variable | Default |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:5001/api` |
+| `NEXT_PUBLIC_SOCKET_URL` | `http://localhost:5001` |
+
+## API
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/imports/trigger-bulk` | Queue all active feeds |
+| POST | `/api/imports/trigger` | Queue a single feed (body: `{ url }`) |
+| GET | `/api/imports/stats` | Dashboard stats and current queue counts |
+| GET | `/api/imports/history` | Paginated import log (`?page=1&limit=20&status=completed`) |
+| GET | `/api/imports/history/:id` | Single import log with failure details |
+| GET | `/api/imports/feeds` | All registered feeds |
+
+## Project layout
+
 ```
-
-**client/.env.local**
-```env
-NEXT_PUBLIC_API_URL=http://localhost:5001/api
-NEXT_PUBLIC_SOCKET_URL=http://localhost:5001
-```
-
-## API Endpoints
-
-```
-POST   /api/imports/trigger-bulk     Kick off all feeds at once
-POST   /api/imports/trigger          Trigger a single feed by URL
-GET    /api/imports/stats            Dashboard stats + queue info
-GET    /api/imports/history          Paginated import history
-GET    /api/imports/history/:id      Details on a specific import
-GET    /api/imports/feeds            List all registered feeds
-```
-
-## Project Structure
-
-```
-jobstream-engine/
-├── client/                 Next.js frontend
+├── client/                 Next.js dashboard
 │   └── src/
-│       ├── app/            Pages and layout
-│       ├── components/     UI components (Header, StatsCards, ImportHistoryTable)
-│       ├── lib/            API client
-│       └── types/          TypeScript types
-├── server/                 Express backend + worker
+│       ├── app/            Pages
+│       ├── components/     StatsCards, ImportHistoryTable, Pagination, Header
+│       ├── lib/            Axios client, Socket.IO setup
+│       └── types/          TypeScript interfaces
+├── server/                 Express API + Bull worker
 │   └── src/
-│       ├── config/         Database connection
-│       ├── controllers/    Route handlers
-│       ├── middleware/     Error handling
-│       ├── models/         Mongoose schemas (Job, JobFeed, ImportLog)
-│       ├── queues/         Bull queue setup
-│       ├── routes/         API routes
-│       ├── services/       Business logic (cron, fetcher, importer)
-│       ├── utils/          Logger, XML parser
-│       └── workers/        Queue processor
-├── docker-compose.yml      Local dev with Docker
+│       ├── config/         MongoDB connection
+│       ├── controllers/    HTTP handlers
+│       ├── middleware/     Error handler, 404
+│       ├── models/         Mongoose schemas — Job, JobFeed, ImportLog
+│       ├── queues/         Bull queue setup and helpers
+│       ├── routes/         Express router
+│       ├── services/       Cron scheduler, XML fetcher, import logic
+│       ├── utils/          Winston logger, XML parser, job transformer
+│       └── workers/        Bull queue processor
+├── docs/
+│   └── architecture.md     Design decisions and system design
+├── docker-compose.yml
 └── README.md
 ```
 
-## Feed Sources
+## Feed sources
 
-The system pulls from these Jobicy feeds by default:
+The feeds are stored in MongoDB (`JobFeed` collection) and seeded automatically on first run. Current list:
 
-1. All Jobs (general feed)
-2. Social Media Marketing
-3. Seller — France region
-4. Design & Multimedia
-5. Data Science
-6. Copywriting
-7. Business
-8. Management
+1. Jobicy — All Jobs
+2. Jobicy — Social Media Marketing (full-time)
+3. Jobicy — Seller, France (full-time)
+4. Jobicy — Design & Multimedia
+5. Jobicy — Data Science
+6. Jobicy — Copywriting
+7. Jobicy — Business
+8. Jobicy — Management
+9. HigherEdJobs — Education
 
-New feeds auto-initialize on first run. If you clear the database and trigger an import, it recreates them without you having to do anything.
+To add a new feed: insert a document into the `JobFeed` collection with `isActive: true` and the URL. The next cron run picks it up. No code change needed.
 
-## License
+## Running tests
 
-MIT
+```bash
+cd server
+npm test
+```
+
+## Assumptions
+
+- The worker runs inside the same process as the API server. If you need to scale them independently (e.g. multiple worker instances), extract the worker into its own service and point it at the same Redis queue. The code in `workers/jobWorker.js` is already self-contained for that.
+- `rawData` on each job document keeps the original parsed XML payload. Useful for debugging feed changes, but adds storage per document. Remove the field from the transformer if storage is a concern at scale.
+- Feed URLs that return malformed XML will show up as failed imports in the history with the parse error. They stay in the feed list so you can see what's happening rather than silently skipping them.
